@@ -1,0 +1,6 @@
+*.pdf
+*.jpg
+*.npy
+*.mat
+*.txt
+build/

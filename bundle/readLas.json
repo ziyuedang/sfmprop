@@ -1,0 +1,8 @@
+{
+    "pipeline":[
+        {
+            "type": "readers.las",
+            "filename": "E:/SFM/wfh/UH_campus/ALS/Titan_data.las"
+        }
+    ]
+}
