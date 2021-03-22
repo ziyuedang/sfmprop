@@ -14,6 +14,10 @@ import math as m
 import cv2
 import statistics as stat
 from scipy.interpolate import griddata
+from skimage import transform
+import scipy.spatial as spatial
+from os import listdir
+import os
 
 # Utils
 
@@ -50,7 +54,7 @@ def pos_3d_2_image_res(intrinsics, extrinsics_single_img, width, height, pos_3d_
     r_coeff = 1 + k1 * r2 + k2 * r4 + k3 * r6
     projected_x = px + (projected_point[0] * r_coeff) * focal
     projected_y = py + (projected_point[1] * r_coeff) * focal
-    return projected_x.flatten(), projected_y.flatten()
+    return projected_x.item(), projected_y.item()
 
 def lidar_2_pos_3d(lidar, intrinsics, extrinsics_single_img):
     # correct offset
@@ -65,30 +69,91 @@ def lidar_2_pos_3d(lidar, intrinsics, extrinsics_single_img):
 
     return X_lidar2sfm
 
-# import lidar data
-inFile, point_records = load_lidar("E:/SFM/wfh/UH_campus/ALS/Titan_data.las")
-x = np.asarray(inFile.x)
-y = np.asarray(inFile.y)
-z = np.asarray(inFile.z)
-intensity = np.asarray(inFile.intensity)
-
 # import camera meta data
 root_path, extrinsics, intrinsics, coords_3d, views_meta, control_points = read_sfm("sfm_data.json", "E:/SFM/wfh/Data/campus_p_0.12_ANNL2_new/reconstruction_global/")
 width = intrinsics['ptr_wrapper']['data']["width"]
 height = intrinsics['ptr_wrapper']['data']["height"]
 
+x_max = width
+y_max = height
 pixel_sz = 0.03 # size of pixel in meters
+n_imgs = len(extrinsics)
+orig_img_path = "E:/SFM/wfh/Data/campus/"
 
-n_imgs = len(coords_3d)
+# import lidar data
+lidar_path = "E:/SFM/wfh/UH_campus/ALS/"
 
-def threedeetoImage(imgID, iterations):    
+# Generate intensity image for each perspective plane (camera angle)
+inFile_lidar, point_records = load_lidar(lidar_path + "Titan_data.las")
+
+# output path for intensity images
+
+path_output = "E:/SFM/wfh/Data/titan_images/"
+
+for imgID in range(0, n_imgs):
     img_filename = views_meta[imgID]['ptr_wrapper']['data']['filename']
-    # pixel_coords_all_imgs = []
+#    X_m, Y_m, sfm_z, index, intensity = pointsToImg(imgID, 4, inFile_lidar, width, height)
+#    image = formatImage(X_m, Y_m, sfm_z, index, x_max, y_max, intensity)
+    orig_img = cv2.cvtColor(cv2.imread("E:/SFM/wfh/Data/campus/" + img_filename), cv2.COLOR_BGR2GRAY)
+    orig_downsample, orig_downsampleSmall = downSample(y_max, x_max, orig_img)
+    
+    cv2.imwrite(path_output + "Original_downsampled_small" + img_filename, orig_downsampleSmall)
+#    downsampledImage, downsampleSmall = downSample(y_max, x_max, image)
+#    cv2.imwrite(path_output + "Intensity_downsampled_small" + img_filename, downsampleSmall)
+
+#    interpImage = image_iterp(downsampleSmall, downsampleSmall.shape[1], downsampleSmall.shape[0])
+#    cv2.imwrite(path_output + "Intensity_IDW_filtered" + img_filename, interpImage)
+
+# Read intensity images 
+
+path_intensity_imgs = "E:/SFM/wfh/Data/titan_images/"
+parent_dir = "E:/SFM/wfh/Data/titan_images/output"
+os.mkdir(parent_dir)
+for imgID in range(0, n_imgs):
+    img_filename = views_meta[imgID]['ptr_wrapper']['data']['filename']
+    intensity_img_filename = "Intensity_IDW_filtered" + img_filename
+    intensity_img = cv2.cvtColor(cv2.imread(path_intensity_imgs + intensity_img_filename), cv2.COLOR_BGR2GRAY)
+    orig_img = cv2.cvtColor(cv2.imread(orig_img_path + img_filename), cv2.COLOR_BGR2GRAY)
+    orig_downsample, orig_downsampleSmall = downSample(y_max, x_max, orig_img)
+    patchSize = 150
+    iteration = 0
+    path = os.path.join(parent_dir, img_filename)
+    mode = 0o666
+    os.mkdir(path, mode)
+    print("Directory '%s' created" % img_filename)
+    for i in range(0, intensity_img.shape[0], patchSize):
+        for j in range(0, intensity_img.shape[1], patchSize):
+            iteration += 1
+            if (intensity_img.shape[0] - i) < patchSize and (intensity_img.shape[1] - j) < patchSize:
+                orig_patch = orig_downsampleSmall[i:intensity_img.shape[0], j:intensity_img.shape[1]]
+                intensity_patch = intensity_img[i:intensity_img.shape[0], j:intensity_img.shape[1]]
+            elif (intensity_img.shape[0] - i) < patchSize and (intensity_img.shape[1] - j) >= patchSize:
+                orig_patch = orig_downsampleSmall[i:intensity_img.shape[0], j:(j+patchSize)]
+                intensity_patch = intensity_img[i:intensity_img.shape[0], j:(j+patchSize)]
+            elif (intensity_img.shape[0] - i) >= patchSize and (intensity_img.shape[1] - j) < patchSize:
+                orig_patch = orig_downsampleSmall[i:(i+patchSize), j:intensity_img.shape[1]]
+                intensity_patch = intensity_img[i:(i+patchSize), j:intensity_img.shape[1]]
+            else:
+                orig_patch = orig_downsampleSmall[i:(i+patchSize), j:(j+patchSize)]
+                intensity_patch = intensity_img[i:(i+patchSize), j:(j+patchSize)]
+            currentPath = os.path.join(path, str(iteration))
+            os.mkdir(currentPath, mode)
+            cv2.imwrite(currentPath + "/orignal_" + str(iteration)  + "_" + img_filename, orig_patch)
+            cv2.imwrite(currentPath + "/intensity_" + str(iteration) + "_" + img_filename, intensity_patch)
+            
+def dataParsing(inFile):
+    x = np.asarray(inFile.x)
+    y = np.asarray(inFile.y)
+    z = np.asarray(inFile.z)
+    intensity = np.asarray(inFile.intensity)
+    return x, y, z, intensity
+
+def pointsToImg(imgID, iterations, inFile, width, height):
+    x, y, z, intensity = dataParsing(inFile)    
     x_min = 0
     y_min = 0
     x_max = width
     y_max = height
-
     extrinsics_single_img = extrinsics[imgID]
     X_m = []
     Y_m = []
@@ -98,32 +163,49 @@ def threedeetoImage(imgID, iterations):
         lidar = np.transpose(np.array([[x[j], y[j], z[j]]]))
         X_lidar2sfm = lidar_2_pos_3d(lidar, intrinsics, extrinsics_single_img)
         X_pixel, Y_pixel = pos_3d_2_image_res(intrinsics, extrinsics_single_img, width, height, X_lidar2sfm)
-        if X_pixel > x_min and X_pixel < x_max and Y_pixel > y_min and Y_pixel < y_max:
+        if X_pixel > x_min and X_pixel < x_max and Y_pixel > y_min and Y_pixel < y_max:                
             X_m.append(X_pixel)
             Y_m.append(Y_pixel)
             sfm_z.append(X_lidar2sfm[2])
             index.append(j)
         else:
             continue
-    image = formatImage(X_m, Y_m, sfm_z, index, x_max, y_max)
+    return X_m, Y_m, sfm_z, index, intensity
+    '''
+    if len(X_m) == 0 or len(Y_m) == 0:
+        print('\n')
+        print(lidar_data_tile_filename, '\n')
+        print('This tile does not have a corresponding patch in image: ' + img_filename)
+        return False
+    else:
+        print('\n')
+        print(lidar_data_tile_filename, '\n')
+        print('This tile has a match in image: ' + img_filename)
+        return X_m, Y_m, sfm_z, index, intensity
+    '''
+    '''
+
+    image = formatImage(X_m, Y_m, sfm_z, index, y_max - y_min, x_max-x_min, intensity)
+    orig_img = cv2.cvtColor(cv2.imread("E:/SFM/wfh/Data/campus/" + img_filename), cv2.COLOR_BGR2GRAY)
+    
+    # cut the original image
+    img_patch = orig_img[x_min:x_max, y_min:y_max]
+    orig_downsample, orig_downsampleSmall = downSample(y_max, x_max, img_patch)
+    cv2.imwrite("Original_downsampled" + img_filename, orig_downsample)
+    cv2.imwrite("Original_downsampled_small" + img_filename, orig_downsampleSmall)
     cv2.imwrite("First" + img_filename, image) 
-    downsampledImage = downSample(y_max, x_max, image)
+    downsampledImage, downsampleSmall = downSample(y_max, x_max, image)
+    cv2.imwrite("FSecondSmall" + img_filename, downsampleSmall)
+
     cv2.imwrite("FSecond" + img_filename, downsampledImage) 
-    averageImage = moving_average(downsampledImage, x_max, y_max, iterations)
-    cv2.imwrite("Final" + img_filename, averageImage) 
-
-def formatImage(X_m, Y_m, sfm_z, index, x_max, y_max):
+    interpImage = image_iterp(downsampleSmall, downsampleSmall.shape[1], downsampleSmall.shape[0])
+    cv2.imwrite("Final" + img_filename, interpImage) 
+    '''
+def formatImage(X_m, Y_m, sfm_z, index, x_max, y_max, intensity):
     intensity_new = intensity[index]
-    # norm_intensity = intensity_new * 25/255
     norm_intensity = intensity_new
-    # norm_intensity = 255*(intensity_new/5000)
-    # image processing
-    # def fillPixel(img, x, y, intensity):
-    #    img[x][y] = intensity/5000
-        
-    # img = cv2.imread("E:/SFM/wfh/Data/campus/" + img_filename)
 
-    pixelCoords = np.frompyfunc(list, 0, 1)(np.empty((x_max, y_max), dtype=object))
+    pixelCoords = np.frompyfunc(list, 0, 1)(np.empty((x_max,y_max), dtype=object))
     for i in range(0, len(X_m)):
         x_pixel = m.floor(X_m[i])
         y_pixel = m.floor(Y_m[i])
@@ -163,13 +245,9 @@ def formatImage(X_m, Y_m, sfm_z, index, x_max, y_max):
 
     normalized_img = (new_img - new_img.min()) /(max(new_img.flatten()) - min(new_img.flatten())) * 255
     normalized_img_uint8 = normalized_img.astype(np.uint8)
-    # equ = cv2.equalizeHist(normalized_img_uint8)
-    # res = np.hstack((normalized_img_uint8, equ))
+
     hist, bins = np.histogram(normalized_img_uint8.flatten(),256,[0,256])
-
     cdf = hist.cumsum()
-    # cdf_normalized = cdf * hist.max()/ cdf.max()
-
     cdf_m = np.ma.masked_equal(cdf,0)
     cdf_m = (cdf_m - cdf_m.min())*255/(cdf_m.max()-cdf_m.min())
     cdf = np.ma.filled(cdf_m,0).astype('uint8')
@@ -178,10 +256,12 @@ def formatImage(X_m, Y_m, sfm_z, index, x_max, y_max):
     return img2
 
 
- # Downsampling image
+# Downsampling image
 def downSample(y_max, x_max, img2):
-    img_downsampled = np.zeros((y_max, x_max))
     n_pixels = 6
+    img_downsampled = np.zeros((y_max, x_max))
+    img_downsampled_small = np.zeros((int(y_max/6), int(x_max/6)))
+
     for i in range(0, x_max, n_pixels):
         for j in range(0, y_max, n_pixels):
             if (x_max - i) < n_pixels or (y_max - j) < n_pixels:
@@ -200,9 +280,10 @@ def downSample(y_max, x_max, img2):
                     avgPatch = 0
                 else:
                     avgPatch = int(sumPatch/cnt)
+                img_downsampled_small[int(j/6), int(i/6)] = avgPatch
                 img_downsampled[j:(j+n_pixels), i:(i+n_pixels)] = avgPatch * np.ones((n_pixels, n_pixels))
-    return img_downsampled
-
+    return img_downsampled, img_downsampled_small
+'''
 # Nearest neighbor to fill the remaining black pixels
 def moving_average(img_downsampled, x_max, y_max, iterations):
     dummy_img = np.zeros((y_max, x_max))
@@ -227,42 +308,52 @@ def moving_average(img_downsampled, x_max, y_max, iterations):
     if iterations == 0:
         return dummy_img
     return moving_average(dummy_img, x_max, y_max, iterations -1)
+'''
+def distance(x1, y1, x2, y2):
+    d = np.sqrt((x1 - x2)**2 + (y1- y2)**2)
+    return d
 
-# cv2.imwrite("DummythiCC" + img_filename, dummy_img)       
-# cv2.imwrite("Downsampled" + img_filename, img_downsampled)
-threedeetoImage(1, 4)
-# for i in range(1, x_max-1):
-#     for j in range(1, y_max-1):
-#         prev = img_downsampled[j, i-1]
-#         curr = img_downsampled[j, i]
-#         next = img_downsampled[j, i+1]
-#         if curr == 0:
-#             if prev == 0:
-#                 continue
-#             elif prev != 0:
-#                 curr = prev
-#         else:
-#             continue
-#         img_downsampled[j, i] = curr
-# cv2.imwrite("new.jpg", img_downsampled)
+# Inverse Distance Weighted algorithm
+def idw_npoint(xz,yz, img_downsampled, x_max, y_max, r, p):
+    z_block=[]
+    xr_min=xz-r
+    xr_max=xz+r
+    yr_min=yz-r
+    yr_max=yz+r
+    if xr_min <= 0:
+        xr_min = 0
+    if xr_max >= x_max:
+        xr_max = x_max
+    if yr_min <= 0:
+        yr_min = 0
+    if yr_max >= y_max:
+        yr_max = y_max
+    nonZero_neighbors = 0
+    w = []
+    tempZ = 0
+    for i in range(xr_min, xr_max):
+        for j in range(yr_min, yr_max):
+            d = distance(xz, yz, i, j)
+            if d <= r and d > 0:                
+                tempZ = img_downsampled[j][i]
+                if tempZ != 0:
+                    w.append(1/(d**p))
+                    z_block.append(tempZ)
+                    nonZero_neighbors += 1
+    if nonZero_neighbors == 0:
+        z_idw = 0    
+    else:
+        z_idw = np.dot(z_block, w)/sum(w)
+    return z_idw
 
-# for i in range(0, x_max):
-# for j in range(0, y_max):
-#     pointID = pixelCoords[i][j]
-#     if len(pointID) == 0 :
-#         continue
-#     elif len(pointID) == 1:
-#         new_img[j][i] = norm_intensity[pointID]
-#     else:
-#         tempZ = []
-#         for pID in pointID:
-#             tempZ.append(sfm_z[pID][0])
-#         filteredID = [index for index, value in enumerate(tempZ) if (value - min(tempZ)) < 0.0026]
-#         filteredIntensity = [norm_intensity[index] for index in filteredID]
-#         new_img[j][i] = m.floor(stat.mean(filteredIntensity))
-
-   # plt.plot(cdf_normalized, color = 'b')
-    # plt.hist(normalized_img_uint8.flatten(),256,[0,256], color = 'r')
-    # plt.xlim([0,256])
-    # plt.legend(('cdf','histogram'), loc = 'upper left')
-    # plt.show()
+# Alternative solution - interpolation to fill the black pixels
+def image_iterp(img_downsampled, x_max, y_max):
+    idw_img = np.zeros((y_max, x_max))
+    for i in tqdm(range(0, x_max)):
+        for j in range(0, y_max):
+            if img_downsampled[j][i] == 0:
+                idw_pixelV = idw_npoint(i, j, img_downsampled, x_max, y_max, 3, 2)
+                idw_img[j][i] = idw_pixelV                          
+            else:
+                idw_img[j][i] = img_downsampled[j][i]
+    return idw_img
