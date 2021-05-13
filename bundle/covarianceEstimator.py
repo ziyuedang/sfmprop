@@ -7,7 +7,7 @@ One extra iteration is performed on the results, thus giving us the ability to
 compute covariance for parameters and 
 @author: zdang2
 """
-import sfm_IO as IO
+
 import numpy as np
 import math as m
 from numpy.linalg import multi_dot
@@ -17,16 +17,7 @@ import scipy.sparse.linalg as linalg
 from numpy.linalg import inv
 import transforms3d
 
-path = 'E:/SFM/wfh/Data/campus_p_0.12_ANNL2/reconstruction_global/'
-root_path, extrinsics, intrinsics, coords_3d, views_meta, control_points = IO.read_sfm('sfm2.json', path)
-# root_path, extrinsics, intrinsics, coords_3d, views_meta, control_points = IO.read_sfm('sfm_georeferenced.json', 'E:/SFM/wfh/Data/campus_p_0.12_ANNL2/reconstruction_global/')
-jacobian_filename = 'jacobian_num_rows_21492num_cols_9426.txt'
-path_jacobian = 'E:/SFM/wfh/Data/campus_p_0.12_ANNL2/'
-# covariance of observations - covxx, covxy, covyy
-cov_l = IO.read_cov('cov_filenames.txt', 'E:/SFM/wfh/Data/campus/')
 
-# load scaled covariance matrix for observations
-C_l = np.load('C_l_scaled_campus.npy')
 def invRotate(M):
     """
     Return omega, phi, kappa in radians given rotation matrix
@@ -52,36 +43,43 @@ def initParams(views_meta, coords_3d, extrinsics, intrinsics):
     Returns: Design matrices Ae, Ao, EO initial values (XYZc, rotation)
     2D image observations (merged_obs), 3D object point coordinates (XYZ_3D)
     """
-    img_obs = []
-    img_obs.clear()
+    # img_obs = []
+    # img_obs.clear()
     n_imgs = len(views_meta)
 
     # XYZ_3D - flattened 3D object point coordinates
     XYZ_3D = np.empty((0, 0))
+    n_obs_per_img = []
     for i in range(0, len(coords_3d)):
-        coords_3d[i]['index_3D'] = i
         XYZ_3D = np.append(XYZ_3D, np.array(coords_3d[i]['X']))
-
+        n_obs_per_img.append(len(coords_3d[i]['observations']))
+    '''
     for i in range(0, len(coords_3d)):
         pnt_3d = coords_3d[i]['observations']
-        index_3d = coords_3d[i]['index_3D']  
+        index_3d = i
         for img in pnt_3d:
             img.update({"index_3D": index_3d})
         img_obs.extend(pnt_3d)
-
+    '''
 
     # list of 2-D image observations for all images
     # merged_obs is a list with length of (n_imgs), each value for each image
     # corresponds to number of observations for that image, (x, y, index of the 3D
     # point which can be found in coords_3d)
-    merged_obs = []   
+    l = []
+    for i in range(0, len(coords_3d)):
+        struct_obs = coords_3d[i]["observations"]
+        for j in struct_obs:
+            l.extend(j["value"]["x"])
+    '''
+    # merged_obs = []   
     obs_count = []
     feat_id = []
-    merged_obs.clear()
+    # merged_obs.clear()
     obs_count.clear()
     for i in range(0, n_imgs):
-        temp = []
-        temp.clear()
+        # temp = []
+        # temp.clear()
         feat_id_temp = []
         for d in range(0, len(img_obs)):
             keyID = img_obs[d]['key']
@@ -91,14 +89,11 @@ def initParams(views_meta, coords_3d, extrinsics, intrinsics):
                 a.append(b)
                 temp.append(a)
                 feat_id_temp.append(img_obs[d]['value']['id_feat'])
-        obs_count.append(len(temp))
-        merged_obs.append(temp)
-        feat_id.append(feat_id_temp)
-
-
-    # Number of 2D image observations
-    n = 2 * sum(obs_count) 
-    
+        # obs_count.append(len(temp))
+        # merged_obs.append(temp)
+        # feat_id.append(feat_id_temp)
+    '''
+   
     # Number of exterior parameters
     ue = 6 * n_imgs
     
@@ -115,12 +110,12 @@ def initParams(views_meta, coords_3d, extrinsics, intrinsics):
     for i in range(0, n_imgs):
         Xc, Yc, Zc = extrinsics[i]['center']
         o, p, k = invRotate(np.array(extrinsics[i]['rotation']))
-        exterior[i, :] = np.array([Xc, Yc, Zc, o, p, k])
+        exterior[i, :] = np.array([o, p, k, Xc, Yc, Zc])
     exterior = exterior.flatten()
     # Intrinsics unpack
     interior = intrinsics['ptr_wrapper']['data']
      
-    return dxe, dxo, exterior, merged_obs, XYZ_3D, interior, feat_id, n, ue, uo, obs_count
+    return dxe, dxo, exterior, XYZ_3D, interior, ue, uo, l, n_obs_per_img
 
 def compute_r_coeff(projected_point, k1, k2, k3):
     """
@@ -311,27 +306,45 @@ def get_tol(ue, uo, coordsTol, kTol, tiltTol):
     t = np.concatenate((tExt, t3d))
     return t
 
-def lsq_constrained(A, P, G, w, bool_sparse):
+def lsq_constrained(A, C_l, G, w, bool_sparse, use_constraints):
     """
     This function calculates (dx, lambda)' = -inv(ATPA, G; G.T, 0)*(ATPw, 0).T
     where lambda is the Lagrange multipliers (not of interest)
     Returns dx
     """
+    if bool_sparse == True:
+    # weights of observations
+        sparseC_l = scipy.sparse.csc_matrix(C_l)
+        P_sparse = scipy.sparse.linalg.inv(sparseC_l)
+        P = scipy.sparse.csc_matrix.toarray(P_sparse)
+    else:
+        P = inv(C_l)
     ATPA = multi_dot([A.T, P, A])
     ATPw = multi_dot([A.T, P, w])
-    ATPw = np.reshape(ATPw, (ATPw.shape[0], 1))
-    N = np.concatenate((np.concatenate((ATPA, G), axis = 1), np.concatenate((G.T, np.zeros((7, 7))), axis = 1)), axis = 0)
-    n =  (-1) * np.concatenate((ATPw, np.zeros((7, 1))))
-    if bool_sparse == True:
-        sparseN = scipy.sparse.csc_matrix(N)
-        Cx_sparse = scipy.sparse.linalg.inv(sparseN)
-        Cx = scipy.sparse.csc_matrix.toarray(Cx_sparse)
+    if use_constraints == 1:
+        N = np.concatenate((np.concatenate((ATPA, G), axis = 1), np.concatenate((G.T, np.zeros((7, 7))), axis = 1)), axis = 0)
+        n =  (-1) * np.concatenate((ATPw, np.zeros((7, 1))))
+        if bool_sparse == True:
+            sparseN = scipy.sparse.csc_matrix(N)
+            Cx_sparse = scipy.sparse.linalg.inv(sparseN)
+            Cx = scipy.sparse.csc_matrix.toarray(Cx_sparse)
+        else:
+            Cx = inv(N)
+        dx_lambda =  np.dot(Cx, n)
+        dx = dx_lambda[0:len(dx_lambda) - 7]
     else:
-        Cx = inv(N)
-    dx_lambda =  np.dot(Cx, n)
-    dx = dx_lambda[0:len(dx_lambda) - 7]
-    dx = np.ravel(dx)
-    return dx, Cx
+        N = ATPA
+        n = -ATPw
+        # n = -ATPw
+        if bool_sparse == True:
+            sparseN = scipy.sparse.csc_matrix(N)
+            Cx_sparse = scipy.sparse.linalg.inv(sparseN)
+            Cx = scipy.sparse.csc_matrix.toarray(Cx_sparse)
+        else:
+            Cx = inv(N)
+
+    dx =  np.dot(Cx, n)
+    return dx, Cx, P
 
 def get_l(merged_obs):
     """
@@ -346,7 +359,7 @@ def get_l(merged_obs):
             
     return l
 
-def get_A(interior, XYZ_3D, exterior, merged_obs, ue, uo):
+def get_A(interior, XYZ_3D, exterior, merged_obs, ue, uo, n, coords_3d):
     img_cnt = 0
     n_obs_cnt = 0
     A_e = np.empty([n, ue])
@@ -382,26 +395,27 @@ def get_A(interior, XYZ_3D, exterior, merged_obs, ue, uo):
     A = np.concatenate((A_e, A_o), axis = 1)
     return A
 
-def leastSquare(initial, interior, XYZ_3D, merged_obs, n_imgs, ue, uo, l, C_l, dx, sparse):
+def leastSquare(initial, GCP, interior, XYZ_3D, n_imgs, ue, uo, ui, l, C_l1, C_l2, C_l, dx, sparse, residuals, jacobian, tol):
     """
     Bundle Adjustment
     """
+    
     iteration = 0
-    maxIter = 30
-    while (np.absolute(dx) >= tol).any():
+    maxIter = 1
+    while (np.absolute(dx[0:(ue + uo)]) >= tol).any():
         if iteration >= maxIter:
             break
-        
+      
         # Split the initial to exterior and OPC
         exterior = initial[0:n_imgs*6]
-        XYZ = initial[n_imgs*6::]
-        
+        interior = initial[ue:(ue + 6)]
+        XYZ = initial[-uo::]
         # Get A
         # A = get_A(interior, XYZ_3D, exterior, merged_obs, ue, uo)
 
         # The order of parameters are different:
         # rotation angle[0], rotation angle[1], rotation angle[2], Xc, Yc, Zc
-        A = IO.read_jacobian(jacobian_filename, path_jacobian, n_imgs)
+        A = jacobian
         # Get Gp
         Gp = get_Gp(XYZ, uo)
         
@@ -412,40 +426,46 @@ def leastSquare(initial, interior, XYZ_3D, merged_obs, n_imgs, ue, uo, l, C_l, d
         G = np.concatenate((Gp, Gs))
 
         # Get estimate
-        estimate = projected_2D(exterior, XYZ, interior, merged_obs)
+        # estimate = projected_2D(exterior, XYZ, interior, merged_obs)
         
         # Get w
-        # w = estimate - l
-        w = np.squeeze(IO.read_residuals('residuals21492.txt', path_jacobian))
+        w = residuals
         
-        if sparse == True:
-            # weights of observations
-            sparseC_l = scipy.sparse.csc_matrix(C_l)
-            P_sparse = scipy.sparse.linalg.inv(sparseC_l)
-            P = scipy.sparse.csc_matrix.toarray(P_sparse)
-        else:
-            P = inv(C_l)
         
+        sparse = True
         # dx = inv(A'PA)*A'Pw
-        dx, Cx= lsq_constrained(A, P, G, w, sparse)
-        initial += dx
-        iteration += 1
+        use_constraints = 0
+        
+        dx, Cx, P_all = lsq_constrained(A, C_l, G, residuals, sparse, use_constraints)
 
-    # Remove G
-    Cx = Cx[0:-7, 0:-7]
+        f_dx = dx.flatten()
+        initial += f_dx
+        iteration += 1
+        if (use_constraints == 1):
+        # Remove G
+            Cx = Cx[0:-7, 0:-7]
 
     # Calculate stds
-    diag = Cx.diagonal()
-    diag_new = diag[0:(ue + uo)]
-    std = np.sqrt(diag_new)
+    # diag = Cx.diagonal()
+    # diag_new = diag[0:(ue + uo + ui)]
+    # std = np.sqrt(diag_new)
     
     # Convert radians to degrees
     # for i in range(0, int(ue/6)):
     #    initial[6 * i + 3 : 6 * (i + 1)] = np.degrees(initial[6 * i + 3 : 6 * (i + 1)])
     #    std[6 * i + 3 : 6 * (i + 1)] = np.degrees(std[6 * i + 3 : 6 * (i + 1)])
-        
-    # Calculate residuals
-    V = np.dot(A, dx) + w
+    P_gcp = inv(C_l2)
+    P_obs = inv(C_l1)
+    m = len(l) # number of functions
+    n = uo + ue + ui# number of unknowns
+    V  = A @ dx + w
+    V_obs = V[0:(m-104)]
+    V_gcp = V[(m-104)::]
+    VTPV_gcp = multi_dot([V_gcp.T, P_gcp, V_gcp])
+    VTPV_obs = multi_dot([V_obs.T, P_obs, V_obs])
+    VTPV = multi_dot([V.T, P_all, V])
+
+    scale = (m - n - VTPV_gcp)/VTPV_obs
 
     # Separate Vx and Vy
     # Vx = V[::2]
@@ -453,82 +473,14 @@ def leastSquare(initial, interior, XYZ_3D, merged_obs, n_imgs, ue, uo, l, C_l, d
 
     
     # Reference variance
-    m = len(l) # number of functions
-    n = uo + ue # number of unknowns
-    refVar = multi_dot([V.T, P, V])/(m - n)
+
+    refVar = VTPV/(m - n)
 
     # Adjusted C_l
     # C_l_adjusted = multi_dot([A, Cx, A.T])
 
     
-    return initial, V, P, std, refVar, iteration, l, Cx, obs_count, C_l_adjusted, m, n
+    return dx, V, refVar, scale, iteration, l, Cx, m, n
 
-def scaleCov(C_l, refVar):
-    return C_l * refVar
-
-# Initialize parameter blocks
-scale = 0.000006
-scale = 1
-dxe, dxo, exterior, merged_obs, XYZ_3D, interior, feat_id, n, ue, uo, obs_count = initParams(views_meta, coords_3d, extrinsics, intrinsics)
-n_imgs = int(ue/6)
-# Observation vector
-l = get_l(merged_obs)
-    
-# Observation covariance (before correction)
-
-
-C_l = get_cov(merged_obs, cov_l, n, scale)
-
-# Use scaled C_l instead
-# C_l = np.load('scaled_C_l.npy')
-# C_l = np.load('scaled_C_l_V_based.npy')
-# Get tolerance
-tol = get_tol(ue, uo, 0.0001, 0.0005, 0.0005)
-    
- # Enter least square iteration
-initial = np.concatenate((exterior, XYZ_3D))
-dx = np.concatenate((dxe, dxo))
-
-# Enter first round of least square iterations
-sparse = True
-
-# C_l = C_l_scaled
-initial, V, P, std, refVar, iteration, l, Cx, obs_count, C_l_adjusted, m, n = leastSquare(initial, interior, XYZ_3D, merged_obs, n_imgs, ue, uo, l, C_l, dx, sparse)
-C_l_scaled = scaleCov(C_l, abs(refVar))
-C_x_scaled = scaleCov(Cx, abs(refVar))
-
-
-# Georeferencing error propagation
-# X_new = S * R * X + t
-# cov_X_new = S^2 * R * cov_X * R'
-Cx_3D = C_x_scaled[ue::, ue::]
-cov_X_new = np.empty((Cx_3D.shape))
-
-# Georefencing results
-s_georef = 383.171
-R_georef = np.array([[-0.0107815, 0.999818, -0.0157572], [0.999941, 0.0107594, -0.00148813], [-0.00131832, -0.0157723, -0.999875]])
-t = np.array([[273747.01], [3289457.931], [471.297]])
-
-# Georegistration with als 
-s_georef = 1
-R_georef = np.array([[-3.695, 383.316, -5.996], [383.360, 3.668, -1.715], [-1.658, -6.012, -383.330]])
-t = np.array([[46.985], [-241.142], [472.254]])
-
-for i in range(len(coords_3d)):
-    Cx_temp = Cx_3D[i*3:(i+1)*3, i*3:(i+1)*3]
-    cov_X_new[i * 3 : (i + 1) * 3, i *3 :(i+1)*3] = (s_georef ** 2) * multi_dot([R_georef, Cx_temp, R_georef.T])
-
-
-XYZ_ref = np.empty((uo, 1))
-
-
-for i in range(len(coords_3d)):
-    XYZ_temp = np.array([[XYZ_3D[3*i]], [XYZ_3D[3*i+1]], [XYZ_3D[3*i+2]]])
-    XYZ_ref[3*i:3*(i+1)] = s_georef * np.dot(R_georef, XYZ_temp) + t
-# Save to mat file
-SIO.savemat('campus_scaled_cx.mat', {'Cx': C_x_scaled})
-SIO.savemat('C_l_orig_campus.mat',{'C_l_orig':C_l})
-SIO.savemat('campus_original.mat', {'initial':initial, 'V':V, 'refVar':refVar,
-'obs':l, 'obs_count':obs_count})
-SIO.savemat('campus_scaled.mat',{'initial':initial, 'V':V, 'refVar':refVar, 'XYZ_georef':XYZ_ref, 
-'obs':l, 'cov_unk_3D':cov_X_new, 'obs_count':obs_count})
+def scaleCov(C_l, scale):
+    return C_l * (1/ scale)

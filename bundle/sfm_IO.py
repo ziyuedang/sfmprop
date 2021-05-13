@@ -10,7 +10,6 @@ import json
 import pandas as pd
 import numpy as np
 import scipy.io as SIO
-import transforms3d
 
 def read_sfm(file_name, path):
     """
@@ -78,13 +77,10 @@ def read_cov(cov_filenames, path):
     cov = []
     for file_name in file_names[0]:
         file = path + file_name
-        with open(file, 'r') as openfile:
-            cov_temp = pd.read_csv(openfile, sep = '\s+', header=[0, 1])
-            cov_temp = cov_temp.reset_index()
-            cov_temp.to_numpy()
-            # Remove duplicates
-            cov_temp_unique = np.unique(cov_temp, axis=0)
-            cov.append(cov_temp_unique)
+        content = []
+        df = pd.read_csv(file, header=None, skiprows = [0, 1], sep = '\t')
+        content = df.to_numpy()        
+        cov.append(content[:, 0:5])
             
             
     return cov      
@@ -98,7 +94,7 @@ def read_jacobian(jacobian_filename, path_jacobian, n_imgs):
     with open(filename, 'r') as openfile:
         content = pd.read_csv(openfile, sep = '\s+', header=None)
     
-    A = np.delete(content.to_numpy(), np.s_[ue:(ue+6)], 1)
+    A = content.to_numpy()
     return A
     
 def read_residuals(residual_filename, path):

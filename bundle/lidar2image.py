@@ -92,55 +92,73 @@ path_output = "E:/SFM/wfh/Data/titan_images/"
 
 for imgID in range(0, n_imgs):
     img_filename = views_meta[imgID]['ptr_wrapper']['data']['filename']
-#    X_m, Y_m, sfm_z, index, intensity = pointsToImg(imgID, 4, inFile_lidar, width, height)
-#    image = formatImage(X_m, Y_m, sfm_z, index, x_max, y_max, intensity)
-    orig_img = cv2.cvtColor(cv2.imread("E:/SFM/wfh/Data/campus/" + img_filename), cv2.COLOR_BGR2GRAY)
-    orig_downsample, orig_downsampleSmall = downSample(y_max, x_max, orig_img)
+    img = Image.open("E:/SFM/wfh/Data/campus/"+img_filename)
+    newsize = (1497, 1122)
+    im1 = img.resize(newsize)
+    im1 = im1.save(path_output  + "Original_downsampled_small" + img_filename)
+    # X_m, Y_m, sfm_z, index, intensity = pointsToImg(imgID, 4, inFile_lidar, width, height)
+    # image, idx_lidar = formatImage(X_m, Y_m, sfm_z, index, x_max, y_max, intensity)
+    # orig_img = cv2.cvtColor(cv2.imread("E:/SFM/wfh/Data/campus/" + img_filename), cv2.COLOR_BGR2GRAY)
     
-    cv2.imwrite(path_output + "Original_downsampled_small" + img_filename, orig_downsampleSmall)
-#    downsampledImage, downsampleSmall = downSample(y_max, x_max, image)
+    # orig_downsample, orig_downsampleSmall = downSample(y_max, x_max, orig_img)
+    # idx_lidar_ds = downsampleIdx(x_max, y_max, idx_lidar)
+    
+    # cv2.imwrite(path_output + "Original_downsampled_small" + img_filename, orig_downsampleSmall)
+    # downsampledImage, downsampleSmall = downSample(y_max, x_max, image)
 #    cv2.imwrite(path_output + "Intensity_downsampled_small" + img_filename, downsampleSmall)
 
 #    interpImage = image_iterp(downsampleSmall, downsampleSmall.shape[1], downsampleSmall.shape[0])
 #    cv2.imwrite(path_output + "Intensity_IDW_filtered" + img_filename, interpImage)
+#    np.save(path_output + '/output' + "/lidar_index_" + img_filename + ".npy", idx_lidar_ds)
 
 # Read intensity images 
 
-path_intensity_imgs = "E:/SFM/wfh/Data/titan_images/"
+path_intensity_imgs = "E:/SFM/wfh/Data/titan_images/output/"
 parent_dir = "E:/SFM/wfh/Data/titan_images/output"
-os.mkdir(parent_dir)
+
 for imgID in range(0, n_imgs):
     img_filename = views_meta[imgID]['ptr_wrapper']['data']['filename']
     intensity_img_filename = "Intensity_IDW_filtered" + img_filename
+    idx_lidar_ds = np.load(path_output + '/output' + "/lidar_index_" + img_filename + '.npy', allow_pickle=True)
     intensity_img = cv2.cvtColor(cv2.imread(path_intensity_imgs + intensity_img_filename), cv2.COLOR_BGR2GRAY)
-    orig_img = cv2.cvtColor(cv2.imread(orig_img_path + img_filename), cv2.COLOR_BGR2GRAY)
-    orig_downsample, orig_downsampleSmall = downSample(y_max, x_max, orig_img)
+    #orig_img = cv2.cvtColor(cv2.imread(orig_img_path + img_filename), cv2.COLOR_BGR2GRAY)
+    #orig_downsample, orig_downsampleSmall = downSample(y_max, x_max, orig_img)
     patchSize = 150
     iteration = 0
     path = os.path.join(parent_dir, img_filename)
     mode = 0o666
-    os.mkdir(path, mode)
-    print("Directory '%s' created" % img_filename)
+    #os.mkdir(path, mode)
+    #print("Directory '%s' created" % img_filename)
     for i in range(0, intensity_img.shape[0], patchSize):
         for j in range(0, intensity_img.shape[1], patchSize):
             iteration += 1
             if (intensity_img.shape[0] - i) < patchSize and (intensity_img.shape[1] - j) < patchSize:
-                orig_patch = orig_downsampleSmall[i:intensity_img.shape[0], j:intensity_img.shape[1]]
+                #orig_patch = orig_downsampleSmall[i:intensity_img.shape[0], j:intensity_img.shape[1]]
                 intensity_patch = intensity_img[i:intensity_img.shape[0], j:intensity_img.shape[1]]
+                lidar_idx_patch = idx_lidar_ds[i:intensity_img.shape[0], j:intensity_img.shape[1]]
             elif (intensity_img.shape[0] - i) < patchSize and (intensity_img.shape[1] - j) >= patchSize:
-                orig_patch = orig_downsampleSmall[i:intensity_img.shape[0], j:(j+patchSize)]
+                #orig_patch = orig_downsampleSmall[i:intensity_img.shape[0], j:(j+patchSize)]
                 intensity_patch = intensity_img[i:intensity_img.shape[0], j:(j+patchSize)]
+                lidar_idx_patch = idx_lidar_ds[i:intensity_img.shape[0], j:(j+patchSize)]
             elif (intensity_img.shape[0] - i) >= patchSize and (intensity_img.shape[1] - j) < patchSize:
-                orig_patch = orig_downsampleSmall[i:(i+patchSize), j:intensity_img.shape[1]]
+                #orig_patch = orig_downsampleSmall[i:(i+patchSize), j:intensity_img.shape[1]]
                 intensity_patch = intensity_img[i:(i+patchSize), j:intensity_img.shape[1]]
+                lidar_idx_patch = idx_lidar_ds[i:(i+patchSize), j:intensity_img.shape[1]]
             else:
-                orig_patch = orig_downsampleSmall[i:(i+patchSize), j:(j+patchSize)]
+                #orig_patch = orig_downsampleSmall[i:(i+patchSize), j:(j+patchSize)]
                 intensity_patch = intensity_img[i:(i+patchSize), j:(j+patchSize)]
+                lidar_idx_patch = idx_lidar_ds[i:(i+patchSize), j:(j+patchSize)]
             currentPath = os.path.join(path, str(iteration))
-            os.mkdir(currentPath, mode)
-            cv2.imwrite(currentPath + "/orignal_" + str(iteration)  + "_" + img_filename, orig_patch)
-            cv2.imwrite(currentPath + "/intensity_" + str(iteration) + "_" + img_filename, intensity_patch)
+            if os.path.isdir(currentPath):
+                np.save(currentPath + '/lidar_index_' + str(iteration)+ "_" + img_filename + '.npy', lidar_idx_patch)
+            else:
+                os.mkdir(currentPath, mode)
+                np.save(currentPath + '/lidar_index_' + str(iteration)+ "_" + img_filename + '.npy', lidar_idx_patch)
+            #os.mkdir(currentPath, mode)
+            #cv2.imwrite(currentPath + "/orignal_" + str(iteration)  + "_" + img_filename, orig_patch)
+            #cv2.imwrite(currentPath + "/intensity_" + str(iteration) + "_" + img_filename, intensity_patch)
             
+
 def dataParsing(inFile):
     x = np.asarray(inFile.x)
     y = np.asarray(inFile.y)
@@ -171,41 +189,13 @@ def pointsToImg(imgID, iterations, inFile, width, height):
         else:
             continue
     return X_m, Y_m, sfm_z, index, intensity
-    '''
-    if len(X_m) == 0 or len(Y_m) == 0:
-        print('\n')
-        print(lidar_data_tile_filename, '\n')
-        print('This tile does not have a corresponding patch in image: ' + img_filename)
-        return False
-    else:
-        print('\n')
-        print(lidar_data_tile_filename, '\n')
-        print('This tile has a match in image: ' + img_filename)
-        return X_m, Y_m, sfm_z, index, intensity
-    '''
-    '''
 
-    image = formatImage(X_m, Y_m, sfm_z, index, y_max - y_min, x_max-x_min, intensity)
-    orig_img = cv2.cvtColor(cv2.imread("E:/SFM/wfh/Data/campus/" + img_filename), cv2.COLOR_BGR2GRAY)
-    
-    # cut the original image
-    img_patch = orig_img[x_min:x_max, y_min:y_max]
-    orig_downsample, orig_downsampleSmall = downSample(y_max, x_max, img_patch)
-    cv2.imwrite("Original_downsampled" + img_filename, orig_downsample)
-    cv2.imwrite("Original_downsampled_small" + img_filename, orig_downsampleSmall)
-    cv2.imwrite("First" + img_filename, image) 
-    downsampledImage, downsampleSmall = downSample(y_max, x_max, image)
-    cv2.imwrite("FSecondSmall" + img_filename, downsampleSmall)
-
-    cv2.imwrite("FSecond" + img_filename, downsampledImage) 
-    interpImage = image_iterp(downsampleSmall, downsampleSmall.shape[1], downsampleSmall.shape[0])
-    cv2.imwrite("Final" + img_filename, interpImage) 
-    '''
 def formatImage(X_m, Y_m, sfm_z, index, x_max, y_max, intensity):
     intensity_new = intensity[index]
     norm_intensity = intensity_new
 
     pixelCoords = np.frompyfunc(list, 0, 1)(np.empty((x_max,y_max), dtype=object))
+    ind_pixelCoords = np.frompyfunc(list, 0, 1)(np.empty((y_max, x_max), dtype=object))
     for i in range(0, len(X_m)):
         x_pixel = m.floor(X_m[i])
         y_pixel = m.floor(Y_m[i])
@@ -218,24 +208,32 @@ def formatImage(X_m, Y_m, sfm_z, index, x_max, y_max, intensity):
     new_img = np.zeros((height, width), np.uint16)
     num_single_point_pixel = 0
     num_pixels = 0
+    emptyPixels = 0
     single_point = []
     multi_point = []
     for i in range(0, x_max):
         for j in range(0, y_max):
-            pointID = pixelCoords[i][j]
+            pointID = pixelCoords[i][j]   
             if len(pointID) == 0 :
+                emptyPixels += 1
                 continue
             elif len(pointID) == 1:
-                new_img[j][i] = norm_intensity[pointID]
+                new_img[j][i] = norm_intensity[pointID]           
                 num_single_point_pixel += 1
                 single_point.append(new_img[j][i])
+
+                ind_pixelCoords[j][i] = [index[pointID[0]]] # append index of lidar points
             else:
                 intensityPixel = []
+                temp = []
                 for pID in pointID:
                     intensityPixel.append(norm_intensity[pID])
+                    temp.append(index[pID])
                 num_pixels += len(intensityPixel) 
                 new_img[j][i] = m.floor(stat.mean(intensityPixel))
                 multi_point.append(new_img[j][i])
+
+                ind_pixelCoords[j][i] = temp
 
     allPixel = []
     for i in range(0, x_max):
@@ -253,7 +251,7 @@ def formatImage(X_m, Y_m, sfm_z, index, x_max, y_max, intensity):
     cdf = np.ma.filled(cdf_m,0).astype('uint8')
 
     img2 = cdf[normalized_img_uint8]
-    return img2
+    return img2, ind_pixelCoords
 
 
 # Downsampling image
@@ -282,7 +280,24 @@ def downSample(y_max, x_max, img2):
                     avgPatch = int(sumPatch/cnt)
                 img_downsampled_small[int(j/6), int(i/6)] = avgPatch
                 img_downsampled[j:(j+n_pixels), i:(i+n_pixels)] = avgPatch * np.ones((n_pixels, n_pixels))
+
     return img_downsampled, img_downsampled_small
+
+def downsampleIdx(x_max, y_max, idx_lidar):
+    n_pixels = 6
+    idx_lidar_downsampled = np.frompyfunc(list, 0, 1)(np.empty((int(y_max/6), int(x_max/6)), dtype=object))
+    for i in range(0, x_max, n_pixels):
+        for j in range(0, y_max, n_pixels):
+            if (x_max - i) < n_pixels or (y_max - j) < n_pixels:
+                continue
+            else:
+                temp = []
+                for k in range(0, n_pixels):
+                    for p in range(0, n_pixels):
+                        temp += idx_lidar[j + k, i + p]
+                idx_lidar_downsampled[int(j/6), int(i/6)] = temp
+    return idx_lidar_downsampled
+
 '''
 # Nearest neighbor to fill the remaining black pixels
 def moving_average(img_downsampled, x_max, y_max, iterations):
